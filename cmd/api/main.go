@@ -32,8 +32,8 @@ func main() {
 	// 3. Load Configurations
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		// Default local development URI
-		dbURL = "postgres://postgres:postgres@localhost:5432/decotrack?sslmode=disable"
+		// Default local development URI (configured to use your active macOS username 'subrataghosh')
+		dbURL = "postgres://subrataghosh@localhost:5432/decotrack?sslmode=disable"
 		log.Printf("DATABASE_URL environment variable is empty. Defaulting to local dev URI: %s", dbURL)
 	}
 

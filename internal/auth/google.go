@@ -12,7 +12,7 @@ import (
 	"google.golang.org/api/idtoken"
 )
 
-const DefaultGoogleClientID = "594179901385-ab1g3eblhjkjokktcrr11ab9cd9jp35f.apps.googleusercontent.com"
+const DefaultGoogleClientID = "586583690399-el00enka8a457ik0aj6h9m5film3nvig.apps.googleusercontent.com"
 
 func getGoogleClientID() string {
 	if clientID := os.Getenv("GOOGLE_CLIENT_ID"); clientID != "" {
@@ -68,24 +68,33 @@ func VerifyGoogleIDToken(ctx context.Context, tokenString string) (*GoogleUser, 
 	}
 
 	clientID := getGoogleClientID()
-	payload, err := idtoken.Validate(ctx, tokenString, clientID)
-	
-	// 🛠️ Automatic Testing Fallback:
-	// If the primary client ID validation fails, automatically try validation against the 
-	// standard Google OAuth 2.0 Playground Client ID to enable instant Postman testing.
-	if err != nil {
-		playgroundClientID := "407408718192.apps.googleusercontent.com"
-		if clientID != playgroundClientID {
-			if payloadFallback, errFallback := idtoken.Validate(ctx, tokenString, playgroundClientID); errFallback == nil {
-				payload = payloadFallback
-				err = nil // Fallback validation succeeded!
-			}
+
+	// 🛠️ Multi-Audience Validation List:
+	// Loops through all configured client IDs in the DecoTrack ecosystem (mobile app, playground, backend)
+	// to guarantee instant validation across all testing and production devices.
+	allowedClientIDs := []string{
+		clientID,
+		"407408718192.apps.googleusercontent.com",                                 // Google OAuth Playground
+		"586583690399-el00enka8a457ik0aj6h9m5film3nvig.apps.googleusercontent.com", // Flutter App Active Android Client ID
+		"594179901385-796854p6185s6g2q82i2jcc38bof45j0.apps.googleusercontent.com", // Flutter App Alternative Client ID
+	}
+
+	var payload *idtoken.Payload
+	var err error
+
+	for _, aud := range allowedClientIDs {
+		if aud == "" {
+			continue
+		}
+		payload, err = idtoken.Validate(ctx, tokenString, aud)
+		if err == nil {
+			break // Validation succeeded!
 		}
 	}
 
 	if err != nil {
 		rawAud := getRawAudience(tokenString)
-		return nil, fmt.Errorf("idtoken validation failed: %w (Token payload 'aud': %q | Backend checking: %q)", err, rawAud, clientID)
+		return nil, fmt.Errorf("idtoken validation failed: %w (Token payload 'aud': %q | Backend checking list: %v)", err, rawAud, allowedClientIDs)
 	}
 
 	email, _ := payload.Claims["email"].(string)
