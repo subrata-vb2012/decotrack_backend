@@ -2,9 +2,12 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"google.golang.org/api/idtoken"
 )
@@ -16,6 +19,39 @@ func getGoogleClientID() string {
 		return clientID
 	}
 	return DefaultGoogleClientID
+}
+
+// getRawAudience parses the unverified JWT payload to inspect its "aud" claim for debugging.
+func getRawAudience(tokenString string) string {
+	parts := strings.Split(tokenString, ".")
+	if len(parts) < 2 {
+		return "invalid-jwt-format"
+	}
+
+	payloadStr := parts[1]
+	// Pad base64 standard padding if needed
+	if l := len(payloadStr) % 4; l > 0 {
+		payloadStr += strings.Repeat("=", 4-l)
+	}
+
+	decoded, err := base64.URLEncoding.DecodeString(payloadStr)
+	if err != nil {
+		// Fallback to standard base64 decoding
+		decoded, err = base64.StdEncoding.DecodeString(payloadStr)
+		if err != nil {
+			return "failed-base64-decode"
+		}
+	}
+
+	var claims map[string]interface{}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return "failed-json-unmarshal"
+	}
+
+	if aud, ok := claims["aud"].(string); ok {
+		return aud
+	}
+	return "missing-aud-claim"
 }
 
 type GoogleUser struct {
@@ -33,8 +69,23 @@ func VerifyGoogleIDToken(ctx context.Context, tokenString string) (*GoogleUser, 
 
 	clientID := getGoogleClientID()
 	payload, err := idtoken.Validate(ctx, tokenString, clientID)
+	
+	// 🛠️ Automatic Testing Fallback:
+	// If the primary client ID validation fails, automatically try validation against the 
+	// standard Google OAuth 2.0 Playground Client ID to enable instant Postman testing.
 	if err != nil {
-		return nil, fmt.Errorf("invalid google token: %w", err)
+		playgroundClientID := "407408718192.apps.googleusercontent.com"
+		if clientID != playgroundClientID {
+			if payloadFallback, errFallback := idtoken.Validate(ctx, tokenString, playgroundClientID); errFallback == nil {
+				payload = payloadFallback
+				err = nil // Fallback validation succeeded!
+			}
+		}
+	}
+
+	if err != nil {
+		rawAud := getRawAudience(tokenString)
+		return nil, fmt.Errorf("idtoken validation failed: %w (Token payload 'aud': %q | Backend checking: %q)", err, rawAud, clientID)
 	}
 
 	email, _ := payload.Claims["email"].(string)

@@ -72,7 +72,19 @@ func main() {
 		FCM: fcmEngine,
 	}
 
-	// 7. Wire API Route groups
+	// 7. Database Connection Pool Status Middleware
+	dbCheck := func(c *gin.Context) {
+		if dbPool == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "Database service is offline. Please ensure your PostgreSQL server is active, a database exists, and the DATABASE_URL environment variable is configured correctly.",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+
+	// 8. Wire API Route groups
 	v1 := router.Group("/api/v1")
 	{
 		// Public Routes
@@ -83,11 +95,11 @@ func main() {
 			})
 		})
 
-		v1.POST("/auth/google", app.AuthenticateGoogleUser)
+		v1.POST("/auth/google", dbCheck, app.AuthenticateGoogleUser)
 
-		// Protected Route Group (Interceptors mapped under AuthMiddleware)
+		// Protected Route Group (Interceptors mapped under AuthMiddleware and dbCheck)
 		protected := v1.Group("")
-		protected.Use(auth.AuthMiddleware())
+		protected.Use(auth.AuthMiddleware(), dbCheck)
 		{
 			// User Settings / Profile
 			protected.GET("/users/me", app.GetMe)
@@ -130,7 +142,7 @@ func main() {
 	// 8. Run Server
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "7070"
 	}
 
 	log.Printf("Starting DecoTrack Backend server on port %s...", port)
