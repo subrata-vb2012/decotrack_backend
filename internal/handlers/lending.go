@@ -340,3 +340,187 @@ func (app *App) RecordReturn(c *gin.Context) {
 		"message":       "Return recorded and inventory stocks restored successfully.",
 	})
 }
+
+type LendingItemResp struct {
+	ItemID   string `json:"itemId"`
+	Name     string `json:"name"`
+	Quantity int    `json:"quantity"`
+}
+
+type LendingResp struct {
+	ID                 string            `json:"id"`
+	ClubID             string            `json:"clubId"`
+	CustomerName       string            `json:"customerName"`
+	CustomerMobile     string            `json:"customerMobile"`
+	CustomerAddress    string            `json:"customerAddress"`
+	Purpose            string            `json:"purpose"`
+	ExpectedReturnDate *time.Time        `json:"expectedReturnDate"`
+	Amount             float64           `json:"amount"`
+	Items              []LendingItemResp `json:"items"`
+	Status             string            `json:"status"`
+	Version            int               `json:"version"`
+	CreatedAt          time.Time         `json:"createdAt"`
+	UpdatedAt          time.Time         `json:"updatedAt"`
+	LentById           string            `json:"lentById"`
+	LentBy             string            `json:"lentBy"`
+}
+
+// ListLendings retrieves all lending records for a club, including their items.
+func (app *App) ListLendings(c *gin.Context) {
+	userUID, exists := c.Get("userUID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User context not found"})
+		return
+	}
+
+	clubID := c.Param("clubId")
+
+	// Verify requester membership
+	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if role == "" || status != "active" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Active club membership required."})
+		return
+	}
+
+	// Fetch all lendings
+	query := `
+		SELECT l.id, l.club_id, l.customer_name, COALESCE(l.customer_mobile, ''), COALESCE(l.customer_address, ''), 
+		       COALESCE(l.purpose, ''), l.expected_return_date, COALESCE(l.amount, 0), l.status, l.created_at, 
+		       COALESCE(l.created_by, ''), COALESCE(u.name, 'System')
+		FROM lendings l
+		LEFT JOIN users u ON l.created_by = u.id
+		WHERE l.club_id = $1
+		ORDER BY l.created_at DESC`
+
+	rows, err := app.DB.Query(c.Request.Context(), query, clubID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query lendings: " + err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	lendings := []LendingResp{}
+	for rows.Next() {
+		var l LendingResp
+		err := rows.Scan(
+			&l.ID, &l.ClubID, &l.CustomerName, &l.CustomerMobile, &l.CustomerAddress,
+			&l.Purpose, &l.ExpectedReturnDate, &l.Amount, &l.Status, &l.CreatedAt,
+			&l.LentById, &l.LentBy,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read lending record: " + err.Error()})
+			return
+		}
+		l.Version = 1
+		l.UpdatedAt = l.CreatedAt // fallback
+		lendings = append(lendings, l)
+	}
+
+	// For each lending, fetch its associated items
+	for i, l := range lendings {
+		itemRows, err := app.DB.Query(c.Request.Context(), `
+			SELECT li.inventory_id, i.name, li.quantity
+			FROM lending_items li
+			JOIN inventory i ON li.inventory_id = i.id
+			WHERE li.lending_id = $1`, l.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query lending items: " + err.Error()})
+			return
+		}
+		defer itemRows.Close()
+
+		items := []LendingItemResp{}
+		for itemRows.Next() {
+			var item LendingItemResp
+			err := itemRows.Scan(&item.ItemID, &item.Name, &item.Quantity)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read lending item: " + err.Error()})
+				return
+			}
+			items = append(items, item)
+		}
+		lendings[i].Items = items
+	}
+
+	c.JSON(http.StatusOK, lendings)
+}
+
+// GetLendingByID retrieves a single lending record by its ID, including its items.
+func (app *App) GetLendingByID(c *gin.Context) {
+	userUID, exists := c.Get("userUID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User context not found"})
+		return
+	}
+
+	clubID := c.Param("clubId")
+	lendingID := c.Param("lendingId")
+
+	// Verify requester membership
+	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if role == "" || status != "active" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Active club membership required."})
+		return
+	}
+
+	// Fetch the lending
+	var l LendingResp
+	query := `
+		SELECT l.id, l.club_id, l.customer_name, COALESCE(l.customer_mobile, ''), COALESCE(l.customer_address, ''), 
+		       COALESCE(l.purpose, ''), l.expected_return_date, COALESCE(l.amount, 0), l.status, l.created_at, 
+		       COALESCE(l.created_by, ''), COALESCE(u.name, 'System')
+		FROM lendings l
+		LEFT JOIN users u ON l.created_by = u.id
+		WHERE l.id = $1 AND l.club_id = $2`
+
+	err = app.DB.QueryRow(c.Request.Context(), query, lendingID, clubID).Scan(
+		&l.ID, &l.ClubID, &l.CustomerName, &l.CustomerMobile, &l.CustomerAddress,
+		&l.Purpose, &l.ExpectedReturnDate, &l.Amount, &l.Status, &l.CreatedAt,
+		&l.LentById, &l.LentBy,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Lending record not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch lending record: " + err.Error()})
+		return
+	}
+	l.Version = 1
+	l.UpdatedAt = l.CreatedAt
+
+	// Fetch items
+	itemRows, err := app.DB.Query(c.Request.Context(), `
+		SELECT li.inventory_id, i.name, li.quantity
+		FROM lending_items li
+		JOIN inventory i ON li.inventory_id = i.id
+		WHERE li.lending_id = $1`, l.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query lending items: " + err.Error()})
+		return
+	}
+	defer itemRows.Close()
+
+	items := []LendingItemResp{}
+	for itemRows.Next() {
+		var item LendingItemResp
+		err := itemRows.Scan(&item.ItemID, &item.Name, &item.Quantity)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read lending item: " + err.Error()})
+			return
+		}
+		items = append(items, item)
+	}
+	l.Items = items
+
+	c.JSON(http.StatusOK, l)
+}
+

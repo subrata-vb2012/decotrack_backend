@@ -124,6 +124,8 @@ func main() {
 
 			// Relational lending & returns (ACID)
 			protected.POST("/clubs/:clubId/lendings", app.CreateLending)
+			protected.GET("/clubs/:clubId/lendings", app.ListLendings)
+			protected.GET("/clubs/:clubId/lendings/:lendingId", app.GetLendingByID)
 			protected.POST("/clubs/:clubId/lendings/:lendingId/returns", app.RecordReturn)
 
 			// Notice board posts & voting polls
