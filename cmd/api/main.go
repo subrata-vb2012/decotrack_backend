@@ -130,6 +130,9 @@ func main() {
 
 			// Notice board posts & voting polls
 			protected.POST("/clubs/:clubId/notices", app.CreateNotice)
+			protected.GET("/clubs/:clubId/notices", app.ListNotices)
+			protected.GET("/clubs/:clubId/notices/:noticeId", app.GetNoticeByID)
+			protected.DELETE("/clubs/:clubId/notices/:noticeId", app.DeleteNotice)
 			protected.POST("/clubs/:clubId/notices/:noticeId/vote", app.CastVote)
 
 			// Ledger accounts and running balance summaries

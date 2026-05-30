@@ -237,3 +237,252 @@ func (app *App) CastVote(c *gin.Context) {
 		"message":  "Vote cast successfully",
 	})
 }
+
+type NoticeResp struct {
+	ID        string         `json:"id"`
+	ClubID    string         `json:"clubId"`
+	Title     string         `json:"title"`
+	Message   string         `json:"message"`
+	IsEvent   bool           `json:"isEvent"`
+	CreatedAt time.Time      `json:"createdAt"`
+	CreatedBy string         `json:"createdBy"`
+	Options   []string       `json:"options"`
+	Votes     map[string]int `json:"votes"`
+	MyVote    *string        `json:"myVote,omitempty"`
+}
+
+// ListNotices retrieves all announcements, RSVP events, and polls for a club.
+func (app *App) ListNotices(c *gin.Context) {
+	userUID, exists := c.Get("userUID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User context not found"})
+		return
+	}
+
+	clubID := c.Param("clubId")
+
+	// Verify requester is a member of the club
+	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if role == "" || status != "active" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Active club membership required."})
+		return
+	}
+
+	// Fetch all notices
+	query := `
+		SELECT n.id, n.club_id, n.title, n.message, n.is_event, n.created_at, COALESCE(u.name, 'System')
+		FROM notices n
+		LEFT JOIN users u ON n.created_by = u.id
+		WHERE n.club_id = $1
+		ORDER BY n.created_at DESC`
+
+	rows, err := app.DB.Query(c.Request.Context(), query, clubID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query notices: " + err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	notices := []NoticeResp{}
+	for rows.Next() {
+		var n NoticeResp
+		err := rows.Scan(&n.ID, &n.ClubID, &n.Title, &n.Message, &n.IsEvent, &n.CreatedAt, &n.CreatedBy)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan notice: " + err.Error()})
+			return
+		}
+		n.Options = []string{}
+		n.Votes = make(map[string]int)
+		notices = append(notices, n)
+	}
+
+	// For each notice, fetch its poll options, vote totals, and the current user's vote
+	for i, n := range notices {
+		// 1. Fetch options
+		optRows, err := app.DB.Query(c.Request.Context(), `SELECT option_text FROM notice_options WHERE notice_id = $1`, n.ID)
+		if err == nil {
+			options := []string{}
+			for optRows.Next() {
+				var opt string
+				if err := optRows.Scan(&opt); err == nil {
+					options = append(options, opt)
+				}
+			}
+			optRows.Close()
+			notices[i].Options = options
+		}
+
+		// 2. Fetch vote totals
+		totalsQuery := `
+			SELECT o.option_text, COUNT(v.user_id) 
+			FROM notice_options o
+			LEFT JOIN notice_votes v ON o.id = v.option_id
+			WHERE o.notice_id = $1
+			GROUP BY o.option_text`
+		totRows, err := app.DB.Query(c.Request.Context(), totalsQuery, n.ID)
+		if err == nil {
+			votesMap := make(map[string]int)
+			for totRows.Next() {
+				var optText string
+				var voteCount int
+				if err := totRows.Scan(&optText, &voteCount); err == nil {
+					votesMap[optText] = voteCount
+				}
+			}
+			totRows.Close()
+			notices[i].Votes = votesMap
+		}
+
+		// 3. Fetch current user's cast vote
+		var myVoteText string
+		myVoteQuery := `
+			SELECT o.option_text 
+			FROM notice_votes v
+			JOIN notice_options o ON v.option_id = o.id
+			WHERE v.notice_id = $1 AND v.user_id = $2`
+		err = app.DB.QueryRow(c.Request.Context(), myVoteQuery, n.ID, userUID).Scan(&myVoteText)
+		if err == nil {
+			notices[i].MyVote = &myVoteText
+		}
+	}
+
+	c.JSON(http.StatusOK, notices)
+}
+
+// GetNoticeByID retrieves a single notice with options and votes details.
+func (app *App) GetNoticeByID(c *gin.Context) {
+	userUID, exists := c.Get("userUID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User context not found"})
+		return
+	}
+
+	clubID := c.Param("clubId")
+	noticeID := c.Param("noticeId")
+
+	// Verify requester is a member of the club
+	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if role == "" || status != "active" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Active club membership required."})
+		return
+	}
+
+	// Fetch notice
+	var n NoticeResp
+	query := `
+		SELECT n.id, n.club_id, n.title, n.message, n.is_event, n.created_at, COALESCE(u.name, 'System')
+		FROM notices n
+		LEFT JOIN users u ON n.created_by = u.id
+		WHERE n.id = $1 AND n.club_id = $2`
+
+	err = app.DB.QueryRow(c.Request.Context(), query, noticeID, clubID).Scan(
+		&n.ID, &n.ClubID, &n.Title, &n.Message, &n.IsEvent, &n.CreatedAt, &n.CreatedBy,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Notice not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch notice: " + err.Error()})
+		return
+	}
+
+	n.Options = []string{}
+	n.Votes = make(map[string]int)
+
+	// Fetch options
+	optRows, err := app.DB.Query(c.Request.Context(), `SELECT option_text FROM notice_options WHERE notice_id = $1`, n.ID)
+	if err == nil {
+		options := []string{}
+		for optRows.Next() {
+			var opt string
+			if err := optRows.Scan(&opt); err == nil {
+				options = append(options, opt)
+			}
+		}
+		optRows.Close()
+		n.Options = options
+	}
+
+	// Fetch vote totals
+	totalsQuery := `
+		SELECT o.option_text, COUNT(v.user_id) 
+		FROM notice_options o
+		LEFT JOIN notice_votes v ON o.id = v.option_id
+		WHERE o.notice_id = $1
+		GROUP BY o.option_text`
+	totRows, err := app.DB.Query(c.Request.Context(), totalsQuery, n.ID)
+	if err == nil {
+		votesMap := make(map[string]int)
+		for totRows.Next() {
+			var optText string
+			var voteCount int
+			if err := totRows.Scan(&optText, &voteCount); err == nil {
+				votesMap[optText] = voteCount
+			}
+		}
+		totRows.Close()
+		n.Votes = votesMap
+	}
+
+	// Fetch current user's cast vote
+	var myVoteText string
+	myVoteQuery := `
+		SELECT o.option_text 
+		FROM notice_votes v
+		JOIN notice_options o ON v.option_id = o.id
+		WHERE v.notice_id = $1 AND v.user_id = $2`
+	err = app.DB.QueryRow(c.Request.Context(), myVoteQuery, n.ID, userUID).Scan(&myVoteText)
+	if err == nil {
+		n.MyVote = &myVoteText
+	}
+
+	c.JSON(http.StatusOK, n)
+}
+
+// DeleteNotice removes a notice by ID.
+func (app *App) DeleteNotice(c *gin.Context) {
+	userUID, exists := c.Get("userUID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User context not found"})
+		return
+	}
+
+	clubID := c.Param("clubId")
+	noticeID := c.Param("noticeId")
+
+	// Verify requester is club owner or admin
+	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if status != "active" || (role != "owner" && role != "admin") {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Owner or Admin permissions required."})
+		return
+	}
+
+	query := `DELETE FROM notices WHERE id = $1 AND club_id = $2`
+	result, err := app.DB.Exec(c.Request.Context(), query, noticeID, clubID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete notice: " + err.Error()})
+		return
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Notice record not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Notice deleted successfully"})
+}
+
