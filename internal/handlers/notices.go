@@ -36,7 +36,7 @@ func (app *App) CreateNotice(c *gin.Context) {
 	}
 
 	// Verify requester is a member of the club
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -169,7 +169,7 @@ func (app *App) CastVote(c *gin.Context) {
 	}
 
 	// Verify requester is a member of the club
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -262,7 +262,7 @@ func (app *App) ListNotices(c *gin.Context) {
 	clubID := c.Param("clubId")
 
 	// Verify requester is a member of the club
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -365,7 +365,7 @@ func (app *App) GetNoticeByID(c *gin.Context) {
 	noticeID := c.Param("noticeId")
 
 	// Verify requester is a member of the club
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -460,7 +460,7 @@ func (app *App) DeleteNotice(c *gin.Context) {
 	noticeID := c.Param("noticeId")
 
 	// Verify requester is club owner or admin
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

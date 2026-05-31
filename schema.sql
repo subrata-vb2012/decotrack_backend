@@ -164,3 +164,25 @@ CREATE TABLE IF NOT EXISTS club_account_entries (
     updated_at TIMESTAMP WITH TIME ZONE,
     updated_by VARCHAR(128) REFERENCES users(id) ON DELETE SET NULL
 );
+
+-- 14. Audit Logs Table (Relational History Tracking)
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    club_id UUID REFERENCES clubs(id) ON DELETE CASCADE,
+    action_type VARCHAR(100) NOT NULL,
+    performed_by VARCHAR(255) NOT NULL,
+    target_entity VARCHAR(255) NOT NULL,
+    old_value JSONB,
+    new_value JSONB,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 15. In-App Notifications Table
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    club_id UUID REFERENCES clubs(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

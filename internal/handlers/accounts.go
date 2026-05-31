@@ -31,7 +31,7 @@ func (app *App) FetchClubAccounts(c *gin.Context) {
 	statusFilter := c.Query("status") // "completed" or "pending"
 
 	// Verify membership
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -104,7 +104,7 @@ func (app *App) AddLedgerEntry(c *gin.Context) {
 	}
 
 	// Verify permissions: Owner, Admin, or Secretary
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -158,7 +158,7 @@ func (app *App) UpdateLedgerEntry(c *gin.Context) {
 	}
 
 	// Verify permissions: Owner or Admin
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -234,7 +234,7 @@ func (app *App) ApproveLedgerEntry(c *gin.Context) {
 	}
 
 	// Verify permissions: Owner, Admin, or Secretary
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -285,7 +285,7 @@ func (app *App) FetchRunningBalance(c *gin.Context) {
 	clubID := c.Param("clubId")
 
 	// Verify membership
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

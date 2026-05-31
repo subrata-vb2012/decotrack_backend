@@ -116,17 +116,21 @@ func main() {
 			protected.GET("/clubs/:clubId/members", app.ListClubMembers)
 			protected.PUT("/clubs/:clubId/members/:userId/role", app.UpdateMemberRole)
 			protected.PUT("/clubs/:clubId/members/:userId/status", app.UpdateMemberStatus)
+			protected.DELETE("/clubs/:clubId/members/:userId", app.RemoveClubMember)
 
 			// Inventory Catalog
 			protected.GET("/clubs/:clubId/inventory", app.FetchClubInventory)
 			protected.POST("/clubs/:clubId/inventory", app.AddInventoryAsset)
 			protected.PUT("/clubs/:clubId/inventory/:itemId", app.UpdateInventoryAsset)
+			protected.DELETE("/clubs/:clubId/inventory/:itemId", app.DeleteInventoryAsset)
 
 			// Relational lending & returns (ACID)
 			protected.POST("/clubs/:clubId/lendings", app.CreateLending)
 			protected.GET("/clubs/:clubId/lendings", app.ListLendings)
 			protected.GET("/clubs/:clubId/lendings/:lendingId", app.GetLendingByID)
+			protected.PUT("/clubs/:clubId/lendings/:lendingId", app.UpdateLending)
 			protected.POST("/clubs/:clubId/lendings/:lendingId/returns", app.RecordReturn)
+			protected.GET("/clubs/:clubId/lendings/:lendingId/returns", app.ListLendingReturns)
 
 			// Notice board posts & voting polls
 			protected.POST("/clubs/:clubId/notices", app.CreateNotice)
@@ -141,6 +145,14 @@ func main() {
 			protected.PUT("/clubs/:clubId/accounts/:entryId", app.UpdateLedgerEntry)
 			protected.PATCH("/clubs/:clubId/accounts/:entryId/status", app.ApproveLedgerEntry)
 			protected.GET("/clubs/:clubId/accounts/balance", app.FetchRunningBalance)
+
+			// Audit logs history
+			protected.GET("/clubs/:clubId/audit-logs", app.ListAuditLogs)
+
+			// In-app notifications
+			protected.GET("/clubs/:clubId/notifications", app.ListNotifications)
+			protected.POST("/clubs/:clubId/notifications", app.AddNotification)
+			protected.PUT("/clubs/:clubId/notifications/:id", app.UpdateNotification)
 		}
 	}
 

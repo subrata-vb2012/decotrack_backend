@@ -29,7 +29,7 @@ func (app *App) FetchClubInventory(c *gin.Context) {
 	invType := c.Query("type") // "lent" or "catering"
 
 	// Verify membership
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -90,7 +90,7 @@ func (app *App) AddInventoryAsset(c *gin.Context) {
 	}
 
 	// Verify permissions: Owner, Admin, or Secretary
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -143,7 +143,7 @@ func (app *App) UpdateInventoryAsset(c *gin.Context) {
 	}
 
 	// Verify permissions: Owner, Admin, or Secretary
-	role, status, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -211,4 +211,46 @@ func (app *App) UpdateInventoryAsset(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, item)
+}
+
+// DeleteInventoryAsset removes an asset from the inventory.
+func (app *App) DeleteInventoryAsset(c *gin.Context) {
+	userUID, exists := c.Get("userUID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User context not found"})
+		return
+	}
+
+	clubID := c.Param("clubId")
+	itemID := c.Param("itemId")
+
+	// Verify permissions: Owner, Admin, or Secretary
+	role, status, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if status != "active" || (role != "owner" && role != "admin" && role != "secretary") {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized. Owner, Admin, or Secretary permissions required."})
+		return
+	}
+
+	// Delete item from database
+	query := `DELETE FROM inventory WHERE id = $1 AND club_id = $2`
+	res, err := app.DB.Exec(c.Request.Context(), query, itemID, clubID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete asset from database: " + err.Error()})
+		return
+	}
+
+	rowsAffected := res.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Asset item not found in this club"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      itemID,
+		"message": "Inventory asset deleted successfully",
+	})
 }

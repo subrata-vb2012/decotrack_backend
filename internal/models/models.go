@@ -141,3 +141,25 @@ type ClubAccountEntry struct {
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
 	UpdatedBy *string    `json:"updatedBy,omitempty"`
 }
+
+// AuditLog represents a record in audit_logs.
+type AuditLog struct {
+	ID           string    `json:"id"`
+	ClubID       string    `json:"clubId"`
+	ActionType   string    `json:"actionType"`
+	PerformedBy  string    `json:"performedBy"`
+	TargetEntity string    `json:"targetEntity"`
+	OldValue     any       `json:"oldValue"`
+	NewValue     any       `json:"newValue"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// Notification represents a record in notifications table.
+type Notification struct {
+	ID        string    `json:"id"`
+	ClubID    string    `json:"clubId"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	IsRead    bool      `json:"isRead"`
+	CreatedAt time.Time `json:"createdAt"`
+}

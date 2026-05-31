@@ -38,7 +38,7 @@ func generateInviteCode(length int) (string, error) {
 }
 
 // checkRequesterRole checks if the user has a specific role in a club.
-func (app *App) getRequesterRoleAndStatus(ctx gin.Context, clubID, userID string) (string, string, error) {
+func (app *App) getRequesterRoleAndStatus(ctx *gin.Context, clubID, userID string) (string, string, error) {
 	var role, status string
 	query := `SELECT role, status FROM club_members WHERE club_id = $1 AND user_id = $2`
 	err := app.DB.QueryRow(ctx.Request.Context(), query, clubID, userID).Scan(&role, &status)
@@ -270,7 +270,7 @@ func (app *App) ListClubMembers(c *gin.Context) {
 	statusFilter := c.Query("status")
 
 	// Validate requester is a member of the club
-	reqRole, reqStatus, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	reqRole, reqStatus, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify membership: " + err.Error()})
 		return
@@ -358,7 +358,7 @@ func (app *App) UpdateMemberRole(c *gin.Context) {
 	}
 
 	// Requester checks: must be owner or admin
-	reqRole, reqStatus, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	reqRole, reqStatus, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -396,6 +396,19 @@ func (app *App) UpdateMemberRole(c *gin.Context) {
 		return
 	}
 
+	// Log audit action
+	var userName string
+	app.DB.QueryRow(c.Request.Context(), `SELECT name FROM users WHERE id = $1`, userUID.(string)).Scan(&userName)
+	if userName == "" {
+		userName = userUID.(string)
+	}
+	var targetName string
+	app.DB.QueryRow(c.Request.Context(), `SELECT name FROM users WHERE id = $1`, targetUserID).Scan(&targetName)
+	if targetName == "" {
+		targetName = targetUserID
+	}
+	app.LogActionHelper(c.Request.Context(), clubID, "role_change", userName, fmt.Sprintf("Member: %s", targetName), targetRole, req.Role)
+
 	c.JSON(http.StatusOK, gin.H{
 		"userId":  targetUserID,
 		"role":    req.Role,
@@ -425,7 +438,7 @@ func (app *App) UpdateMemberStatus(c *gin.Context) {
 	}
 
 	// Requester checks: must be owner or admin
-	reqRole, reqStatus, err := app.getRequesterRoleAndStatus(*c, clubID, userUID.(string))
+	reqRole, reqStatus, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -467,5 +480,61 @@ func (app *App) UpdateMemberStatus(c *gin.Context) {
 		"userId":  targetUserID,
 		"status":  req.Status,
 		"message": "Member status updated successfully",
+	})
+}
+
+// RemoveClubMember removes a member (or rejects a pending request).
+func (app *App) RemoveClubMember(c *gin.Context) {
+	userUID, exists := c.Get("userUID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User context not found"})
+		return
+	}
+
+	clubID := c.Param("clubId")
+	targetUserID := c.Param("userId")
+
+	// Requester checks: must be owner or admin
+	reqRole, reqStatus, err := app.getRequesterRoleAndStatus(c, clubID, userUID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if reqStatus != "active" || (reqRole != "owner" && reqRole != "admin") {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized. Owner or Admin permissions required."})
+		return
+	}
+
+	// Prevent self modifications
+	if targetUserID == userUID.(string) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "You cannot remove yourself from the club."})
+		return
+	}
+
+	// Check if target exists
+	var targetRole string
+	err = app.DB.QueryRow(c.Request.Context(), `SELECT role FROM club_members WHERE club_id = $1 AND user_id = $2`, clubID, targetUserID).Scan(&targetRole)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Target user is not registered in this club"})
+		return
+	}
+
+	// Owner checks: admin cannot modify role/status of owner or other admins
+	if reqRole == "admin" && (targetRole == "owner" || targetRole == "admin") {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Admins cannot remove other Admins or Owners."})
+		return
+	}
+
+	// Perform deletion
+	query := `DELETE FROM club_members WHERE club_id = $1 AND user_id = $2`
+	_, err = app.DB.Exec(c.Request.Context(), query, clubID, targetUserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove member: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"userId":  targetUserID,
+		"message": "Member removed successfully",
 	})
 }
